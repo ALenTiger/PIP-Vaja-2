@@ -10,7 +10,7 @@
 using namespace std;
 
 void print(string text) {
-    std::cout << endl << text;
+    std::cout << endl << endl << text;
 }
 unsigned int seed = 0;
 
@@ -24,6 +24,7 @@ chrono::steady_clock::time_point best_begin;
 chrono::steady_clock::time_point best_end;
 int best_min = INT_MAX;
 double best_max = INT_MIN;
+vector<bool> bestSL;
 
 
 int Ck(vector<bool>* Sl, int k, int start_i, int end_i) {
@@ -52,7 +53,7 @@ int parallelPSL(vector<bool>* Sl) {
     for (int k = 1; k < thread_n; k++) {
         int strt_i = k * (L / thread_n);
         int end_i = (k + 1) * (L / thread_n);
-        futures.push_back(async(launch::async, Ck, Sl, k, strt_i, end_i));
+        futures.emplace_back(async(launch::async, Ck, Sl, k, strt_i, end_i));
     }
     for (future<int>& f : futures) {
         int temp = f.get();
@@ -79,7 +80,7 @@ double parallelMF(vector<bool>* Sl) {
     for (int k = 1; k < thread_n; k++) {
         int strt_i = k * (L / thread_n);
         int end_i = (k + 1) * (L / thread_n);
-        futures.push_back(async(launch::async, Ck, Sl, k, strt_i, end_i));
+        futures.emplace_back(async(launch::async, Ck, Sl, k, strt_i, end_i));
     }
     for (future<int>& f : futures) {
         int temp = f.get();
@@ -88,7 +89,7 @@ double parallelMF(vector<bool>* Sl) {
     return pow(L, 2) / (2 * sum);
 }
 
-pair<vector<bool>, int> minimizePSL(vector<bool>* Sl, bool print_neighbour_value = false) {
+vector<bool> minimizePSL(vector<bool>* Sl, bool print_neighbour_value = false) {
     int min = parallelPSL(Sl);
     vector<bool> min_neighbour = vector<bool>(Sl->size()); //sprobaj če hitreje deluje če delamu tu z min_neigbour_index namesto da se kreira oz. kopira vector<bool>
 
@@ -103,10 +104,15 @@ pair<vector<bool>, int> minimizePSL(vector<bool>* Sl, bool print_neighbour_value
         (*Sl)[i] = !(*Sl)[i];
         nfes++;
     }
-    return make_pair(min_neighbour, min);
+    if (min < best_min) {
+        best_end = std::chrono::steady_clock::now();
+        best_min = min;
+        bestSL = min_neighbour;
+    }
+    return min_neighbour;
 }
 
-pair<vector<bool>, int> maximizeMF(vector<bool>* Sl, bool print_neighbour_value = false) {
+vector<bool> maximizeMF(vector<bool>* Sl, bool print_neighbour_value = false) {
     int max = parallelMF(Sl);
     vector<bool> max_neighbour = vector<bool>(Sl->size());//sprobaj če hitreje deluje če delamu tu z min_neigbour_index namesto da se kreira oz. kopira vector<bool>
 
@@ -121,14 +127,21 @@ pair<vector<bool>, int> maximizeMF(vector<bool>* Sl, bool print_neighbour_value 
         (*Sl)[i] = !(*Sl)[i];
         nfes++;
     }
-    return make_pair(max_neighbour, max);
+    if (max > best_max) {
+        best_end = std::chrono::steady_clock::now();
+        best_max = max;
+        bestSL = max_neighbour;
+    }
+    return max_neighbour;
 }
 
 vector<bool> evaluate(int n, int L, string type) {
-    pair<vector<bool>, int> bestSl(vector<bool>(L), INT_MIN);
-    pair<vector<bool>, int> cur;
-    if (type == "PSL") bestSl.second = INT_MAX;
+    //pair<vector<bool>, int> bestSl(vector<bool>(L), INT_MIN);
+    vector<bool> cur;
+    //if (type == "PSL") bestSl.second = INT_MAX;
+
     vector<bool> Sl = vector<bool>(L);
+
     for (int i = 0; i < n; i++) {
 
         for (int j = 0; j < L; j++) {
@@ -137,14 +150,14 @@ vector<bool> evaluate(int n, int L, string type) {
 
         if (type == "PSL") {
             cur = minimizePSL(&Sl);
-            if (cur.second < bestSl.second) bestSl = cur;
+            //if (cur.second < bestSl.second) bestSl = cur;
         }
         else if(type == "MF") {
             cur = maximizeMF(&Sl);
-            if (cur.second > bestSl.second) bestSl = cur;
+            //if (cur.second > bestSl.second) bestSl = cur;
         }
     }
-    return bestSl.first;
+    return bestSL;
 }
 
 int main() {
@@ -164,14 +177,17 @@ int main() {
 
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
     auto time_taken = std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
+    auto best_time_taken = std::chrono::duration_cast<std::chrono::microseconds>(best_end - begin).count();
 
     //Sl = test_h;
 
 
-    int psl = parallelPSL(&Sl);
-    double mf = parallelMF(&Sl);
+    int psl = PSL(&test_a);
+    double mf = MF(&test_a);
 
     print("\n\nPSL: " + to_string(psl) + "   MF: " + to_string(mf) + "   nfes: " + to_string(nfes));
     print("celoten cas izvajanja (" + to_string(nfes) + ")-ih ovrednotenj: " + to_string(time_taken ) + " sec");
-    print("povprečen čas 1 ovrednotenja: " + to_string((time_taken / nfes)) + " sec");
+    print("povprečen cas 1 ovrednotenja: " + to_string((time_taken / nfes)) + " sec");
+    print("Čas potreben, da smo najsli najbolslo resitev: " + to_string((best_time_taken)) + " sec");
+    print("\n");
 }
