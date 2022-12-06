@@ -25,11 +25,15 @@ chrono::steady_clock::time_point best_begin;
 chrono::steady_clock::time_point best_end;
 int best_min = INT_MAX;
 double best_max = INT_MIN;
-vector<bool> bestSL;
+bool* bestSL;
 vector<int> times;
 int long long total_eval_time;
 
-string toSequance(vector<bool> binary_) {
+string toSequance(bool* binary_b, int L) {
+    vector<bool> binary_ = vector<bool>(L);
+    for (int i = 0; i < L; i++) {
+        binary_[i] = binary_b[i];
+    }
     int padding = 4 - binary_.size() % 4;
     vector<bool> binary;
     for (int i = 0; i < padding; i++) binary.push_back(0);
@@ -52,17 +56,43 @@ string toSequance(vector<bool> binary_) {
     return "0x" + output;
 }
 
-int Ck(vector<bool>* Sl, int k, int start_i, int end_i) {
+bool** splitArr(bool* arr, int L, int thread_n_ = thread_n) {
+    bool** splited = new bool*[thread_n_];
+    for (int i = 0; i < thread_n_; i++) {
+        splited[i] = new bool[L];
+        for (int j = 0; j < L; j++) {
+            splited[i][j] = arr[j];
+        }
+    }
+    return splited;
+}
+
+bool* vectorToArr(vector<bool> vec) {
+    bool* arr = new bool[vec.size()];
+    for (int i = 0; i < vec.size(); i++) {
+        arr[i] = vec[i];
+    }
+    return arr;
+}
+
+int splitedCk(bool* Sl, int k, int start_i, int end_i) {
     int sum = 0;
     for (int i = start_i; i < end_i - k; i++) {
-        sum += ((*Sl)[i]*2 - 1)  * ((*Sl)[i + k] * 2 -1);
+        sum += (Sl[i] * 2 - 1) * (Sl[i + k] * 2 - 1);
     }
     return sum;
 }
 
-int PSL(vector<bool>* Sl) {
+int Ck(bool* Sl, int k, int start_i, int end_i) {
+    int sum = 0;
+    for (int i = start_i; i < end_i - k; i++) {
+        sum += (Sl[i] * 2 - 1)* (Sl[i + k] * 2 - 1);
+    }
+    return sum;
+}
+
+int PSL(bool* Sl, int L) {
     int max = INT_MIN;
-    int L = Sl->size();
     for (int k = 1; k < L; k++) {
         int temp = Ck(Sl, k, 0, L);
         if (temp > max) max = temp;
@@ -70,9 +100,8 @@ int PSL(vector<bool>* Sl) {
     return max;
 }
 
-int splitedPSL(vector<bool>* Sl, int start_i, int end_i) {
+int splitedPSL(bool* Sl, int L, int start_i, int end_i) {
     int max = INT_MIN;
-    int L = Sl->size();
     if (start_i == 0) start_i = 1;
     for (int k = start_i; k < end_i; k++) {
         //print("t: " + to_string(start_i) + "#" + to_string(k));
@@ -82,15 +111,16 @@ int splitedPSL(vector<bool>* Sl, int start_i, int end_i) {
     return max;
 }
 
-int parallelPSL(vector<bool>* Sl) {
+int parallelPSL(bool* Sl, int L) {
     int max = INT_MIN;
-    int L = Sl->size();
     vector<future<int>> futures;
+
+    bool** splited = splitArr(Sl, L);
 
     for (int i = 0; i < thread_n; i++) {
         int strt_i = i * (L / thread_n);
         int end_i = (i + 1) * (L / thread_n);
-        futures.push_back(async(launch::async, splitedPSL, Sl, strt_i, end_i));
+        futures.push_back(async(launch::async, splitedPSL, splited[i], L, strt_i, end_i));
     }
     for (future<int>& f : futures) {
         int temp = f.get();
@@ -101,18 +131,16 @@ int parallelPSL(vector<bool>* Sl) {
 
 
 
-double MF(vector<bool>* Sl) {
+double MF(bool* Sl, int L) {
     int sum = 0;
-    int L = Sl->size();
     for (int k = 1; k < L; k++) {
         sum += pow(Ck(Sl, k, 0, L), 2);
     }
     return pow(L, 2) / (2 * sum);
 }
 
-int splitedMF(vector<bool>* Sl, int start_i, int end_i) {
+int splitedMF(bool* Sl, int L, int start_i, int end_i) {
     int sum = 0;
-    int L = Sl->size();
     if (start_i == 0) start_i = 1;
     for (int k = start_i; k < end_i; k++) {
         sum += pow(Ck(Sl, k, 0, L), 2);
@@ -120,15 +148,15 @@ int splitedMF(vector<bool>* Sl, int start_i, int end_i) {
     return sum;
 }
 
-double parallelMF(vector<bool>* Sl) {
+double parallelMF(bool* Sl, int L) {
     int sum = 0;
-    int L = Sl->size();
     vector<future<int>> futures;
 
     for (int k = 0; k < thread_n; k++) {
         int strt_i = k * (L / thread_n);
         int end_i = (k + 1) * (L / thread_n);
-        futures.push_back(async(launch::async, splitedMF, Sl, strt_i, end_i));
+        if (k == thread_n - 1 && end_i != L) end_i = L;
+        futures.push_back(async(launch::async, splitedMF, Sl, L, strt_i, end_i));
     }
     for (future<int>& f : futures) {
         int temp = f.get();
@@ -137,16 +165,16 @@ double parallelMF(vector<bool>* Sl) {
     return pow(L, 2) / (2 * sum);
 }
 
-void minimizePSL(vector<bool>* Sl, bool print_neighbour_value = false, bool print_eval_time = false) {
-    int min = parallelPSL(Sl);
+void minimizePSL(bool* Sl, int L, bool print_neighbour_value = false, bool print_eval_time = false) {
+    int min = parallelPSL(Sl, L);
     int best_i = 0;
     //vector<bool> min_neighbour = vector<bool>(Sl->size()); //sprobaj če hitreje deluje če delamu tu z min_neigbour_index namesto da se kreira oz. kopira vector<bool>
 
-    for (int i = 0; i < Sl->size(); i++) { //ovrednoti PSL za vse sosede Sl in najde najmanjšega
-        (*Sl)[i] = !(*Sl)[i];
+    for (int i = 0; i < L; i++) { //ovrednoti PSL za vse sosede Sl in najde najmanjšega
+        Sl[i] = !Sl[i];
 
         chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        int temp = parallelPSL(Sl);
+        int temp = parallelPSL(Sl, L);
         chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         auto temp_time = chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
         total_eval_time += temp_time;
@@ -156,28 +184,28 @@ void minimizePSL(vector<bool>* Sl, bool print_neighbour_value = false, bool prin
             min = temp;
             best_i = i;
         }
-        (*Sl)[i] = !(*Sl)[i];
+        Sl[i] = !Sl[i];
         nfes++;
     }
-    (*Sl)[best_i] = !(*Sl)[best_i];
+    Sl[best_i] = !Sl[best_i];
     if (min < best_min) {
         best_end = std::chrono::steady_clock::now();
         best_min = min;
-        bestSL = (*Sl);
+        bestSL = Sl;
     }
 }
 
-void maximizeMF(vector<bool>* Sl, bool print_neighbour_value = false) {
-    int max = parallelMF(Sl);
+void maximizeMF(bool* Sl, int L, bool print_neighbour_value = false) {
+    int max = parallelMF(Sl, L);
     int best_i = 0;
 
     //vector<bool> max_neighbour = vector<bool>(Sl->size());//sprobaj če hitreje deluje če delamu tu z min_neigbour_index namesto da se kreira oz. kopira vector<bool>
 
-    for (int i = 0; i < Sl->size(); i++) { //ovrednoti PSL za vse sosede Sl in najde najmanjšega
-        (*Sl)[i] = !(*Sl)[i];
+    for (int i = 0; i < L; i++) { //ovrednoti PSL za vse sosede Sl in najde najmanjšega
+        Sl[i] = !Sl[i];
 
         chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        int temp = parallelMF(Sl);
+        int temp = parallelMF(Sl, L);
         chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         auto temp_time = end - begin;
         total_eval_time += (int)temp_time.count();
@@ -188,23 +216,23 @@ void maximizeMF(vector<bool>* Sl, bool print_neighbour_value = false) {
             best_i = i;
 
         }
-        (*Sl)[i] = !(*Sl)[i];
+        Sl[i] = !Sl[i];
         nfes++;
     }
-    (*Sl)[best_i] = !(*Sl)[best_i];
+    Sl[best_i] = !Sl[best_i];
     if (max > best_max) {
         best_end = std::chrono::steady_clock::now();
         best_max = max;
-        bestSL = (*Sl);
+        bestSL = Sl;
     }
 }
 
-vector<bool> evaluate(int n, int L, string type, bool print_progress = true) {
+bool* evaluate(int n, int L, string type, bool print_progress = false) {
     //pair<vector<bool>, int> bestSl(vector<bool>(L), INT_MIN);
-    vector<bool> cur;
+    //vector<bool> cur;
     //if (type == "PSL") bestSl.second = INT_MAX;
 
-    vector<bool> Sl = vector<bool>(L);
+    bool* Sl = new bool[L];
 
     for (int j = 0; j < L; j++) {
         Sl[j] = rand() % 2;
@@ -214,11 +242,11 @@ vector<bool> evaluate(int n, int L, string type, bool print_progress = true) {
         //float f = i % (n / 100);
         if (print_progress ) print(to_string((((float)i) / ((float)n)) * 100) + "%..    ", false);
         if (type == "PSL") {
-            minimizePSL(&Sl);
+            minimizePSL(Sl, L);
             //if (cur.second < bestSl.second) bestSl = cur;
         }
         else if(type == "MF") {
-            maximizeMF(&Sl);
+            maximizeMF(Sl, L);
             //if (cur.second > bestSl.second) bestSl = cur;
         }
     }
@@ -229,14 +257,13 @@ int main() {
     vector<bool> test_a = { 0, 1, 0, 0, 0 };
     vector<bool> test_d = { 1, 0, 0, 0, 1, 0, 0, 1 };
     vector<bool> test_h = { 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0 };
-    string test = toSequance(test_a);
     unsigned int L = 250;
     string type = "PSL";
-    unsigned int nfesLmt = 20;
+    unsigned int nfesLmt = 100;
 
     srand(seed);
 
-    vector<bool> Sl;
+    bool *Sl;
 
     int n = thread_n;
     thread_n = 0;
@@ -254,8 +281,8 @@ int main() {
         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         auto time_taken = std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
         auto best_time_taken = std::chrono::duration_cast<std::chrono::microseconds>(best_end - best_begin).count();
-        int psl = parallelPSL(&Sl);
-        double mf = parallelMF(&Sl);
+        int psl = parallelPSL(Sl, L);
+        double mf = parallelMF(Sl, L);
         print("\n\nPSL: " + to_string(psl) + "   MF: " + to_string(mf) + "   nfes: " + to_string(nfes));
         auto test = total_eval_time;
         print("povprečen čas 1 ovrednotenja: " + to_string((time_taken / nfes)) + " mus");
@@ -265,7 +292,7 @@ int main() {
         print("Čas potreben, da smo najsli najbolslo resitev: " + to_string(best_time_taken) + " mus");
         print("ali: " + to_string(best_time_taken / (float)1000000) + " sec");
         print("peed (st ovrednotenj na sekundo)" + to_string(nfes / (total_eval_time /1000000)));
-        print("sekvenca: " + toSequance(Sl));
+        print("sekvenca: " + toSequance(Sl, L));
     }
 
     print("\n----\n\nizhod:");
@@ -278,8 +305,8 @@ int main() {
     //Sl = test_h;*/
 
     thread_n = 4;
-    int psl = parallelPSL(&test_d);
-    double mf = parallelMF(&test_d);
+    int psl = parallelPSL(vectorToArr(test_d), L);
+    double mf = parallelMF(vectorToArr(test_d), L);
     print("\n\nPSL: " + to_string(psl) + "   MF: " + to_string(mf) + "   nfes: " + to_string(nfes));
     print("\n");
 }
