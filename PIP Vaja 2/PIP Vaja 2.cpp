@@ -6,6 +6,7 @@
 #include <future>
 #include <chrono>
 #include <cmath>
+#include <omp.h>
 
 using namespace std;
 
@@ -15,7 +16,7 @@ void print(string text, bool endl_ = true) {
 }
 unsigned int seed = 0;
 
-int thread_n = 4;
+int thread_n = 8;
 int nfes=0;
 
 //vector<bool> Sl;
@@ -28,6 +29,8 @@ double best_max = INT_MIN;
 bool* bestSL;
 vector<int> times;
 int long long total_eval_time;
+
+int openmp_thread_n = 0;
 
 string toSequance(bool* binary_b, int L) {
     vector<bool> binary_ = vector<bool>(L);
@@ -100,13 +103,16 @@ int PSL(bool* Sl, int L) {
     return max;
 }
 
-int splitedPSL(bool* Sl, int L, int start_i, int end_i) {
+int splitedPSL(bool* Sl, int L, int start_i) {
     int max = INT_MIN;
-    if (start_i == 0) start_i = 1;
-    for (int k = start_i; k < end_i; k++) {
-        //print("t: " + to_string(start_i) + "#" + to_string(k));
-        int temp = Ck(Sl, k, 0, L);
+    //if (start_i == 0) start_i = 1;
+    for (int i = 1 + start_i; i <= L / 2; i += thread_n) {
+        int temp = Ck(Sl, L - i, 0, L);
         if (temp > max) max = temp;
+        if (L - i != i) {
+            temp = Ck(Sl, i, 0, L);
+            if (temp > max) max = temp;
+        }
     }
     return max;
 }
@@ -115,12 +121,8 @@ int parallelPSL(bool* Sl, int L) {
     int max = INT_MIN;
     vector<future<int>> futures;
 
-    bool** splited = splitArr(Sl, L);
-
     for (int i = 0; i < thread_n; i++) {
-        int strt_i = i * (L / thread_n);
-        int end_i = (i + 1) * (L / thread_n);
-        futures.push_back(async(launch::async, splitedPSL, splited[i], L, strt_i, end_i));
+        futures.push_back(async(launch::async, splitedPSL, Sl, L, i));
     }
     for (future<int>& f : futures) {
         int temp = f.get();
@@ -128,6 +130,7 @@ int parallelPSL(bool* Sl, int L) {
     }
     return max;
 }
+
 
 
 
@@ -165,16 +168,20 @@ double parallelMF(bool* Sl, int L) {
     return pow(L, 2) / (2 * sum);
 }
 
+
 void minimizePSL(bool* Sl, int L, bool print_neighbour_value = false, bool print_eval_time = false) {
-    int min = parallelPSL(Sl, L);
+    int min = PSL(Sl, L);
     int best_i = 0;
     //vector<bool> min_neighbour = vector<bool>(Sl->size()); //sprobaj če hitreje deluje če delamu tu z min_neigbour_index namesto da se kreira oz. kopira vector<bool>
-
+ 
+    #pragma omp parallel for num_threads (thread_n)
     for (int i = 0; i < L; i++) { //ovrednoti PSL za vse sosede Sl in najde najmanjšega
+        int used_threads = omp_get_num_threads();
+        if (used_threads > openmp_thread_n) openmp_thread_n = used_threads;
         Sl[i] = !Sl[i];
 
         chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        int temp = parallelPSL(Sl, L);
+        int temp = PSL(Sl, L);
         chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         auto temp_time = chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
         total_eval_time += temp_time;
@@ -227,7 +234,7 @@ void maximizeMF(bool* Sl, int L, bool print_neighbour_value = false) {
     }
 }
 
-bool* evaluate(int n, int L, string type, bool print_progress = false) {
+bool* evaluate(int n, int L, string type, bool print_progress = true) {
     //pair<vector<bool>, int> bestSl(vector<bool>(L), INT_MIN);
     //vector<bool> cur;
     //if (type == "PSL") bestSl.second = INT_MAX;
@@ -240,7 +247,7 @@ bool* evaluate(int n, int L, string type, bool print_progress = false) {
 
     for (int i = 0; i < n; i++) {
         //float f = i % (n / 100);
-        if (print_progress ) print(to_string((((float)i) / ((float)n)) * 100) + "%..    ", false);
+        if (print_progress && !(i%50)) print(to_string((((float)i) / ((float)n)) * 100) + "%..    ", false);
         if (type == "PSL") {
             minimizePSL(Sl, L);
             //if (cur.second < bestSl.second) bestSl = cur;
@@ -257,9 +264,9 @@ int main() {
     vector<bool> test_a = { 0, 1, 0, 0, 0 };
     vector<bool> test_d = { 1, 0, 0, 0, 1, 0, 0, 1 };
     vector<bool> test_h = { 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0 };
-    unsigned int L = 250;
+    unsigned int L = 200;
     string type = "PSL";
-    unsigned int nfesLmt = 100;
+    unsigned int nfesLmt = 5000;
 
     srand(seed);
 
@@ -293,6 +300,7 @@ int main() {
         print("ali: " + to_string(best_time_taken / (float)1000000) + " sec");
         print("peed (st ovrednotenj na sekundo)" + to_string(nfes / (total_eval_time /1000000)));
         print("sekvenca: " + toSequance(Sl, L));
+        print("number of used threads with open mp: " + to_string(openmp_thread_n));
     }
 
     print("\n----\n\nizhod:");
